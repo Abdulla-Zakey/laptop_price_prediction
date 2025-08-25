@@ -8,13 +8,14 @@ import matplotlib.pyplot as plt
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.model_selection import GridSearchCV
-import matplotlib.pyplot as plt
-import joblib
+import joblib, pickle
 
 
 def load_preprocess_data(filePath):
-    data = pd.read_csv("./laptopPrice.csv")
+    data = pd.read_csv(filePath)
 
+    df = clean_numeric_data(data)
+    
     categorical_columns = [
         "brand",
         "processor_brand",
@@ -23,40 +24,45 @@ def load_preprocess_data(filePath):
         "ram_type",
         "os",
         "weight",
-        "rating",
         "warranty",
         "Touchscreen",
         "msoffice",
     ]
 
-    df = pd.get_dummies(data, columns=categorical_columns, drop_first=True)
+    df = pd.get_dummies(df, columns=categorical_columns, drop_first=True)
 
-    df = clean_numeric_data(df)
-
-    df["Number_of_Ratings"] = np.log1p(df["Number_of_Ratings"])
-    df["Number_of_Reviews"] = np.log1p(df["Number_of_Reviews"])
-
-    df = df.astype(int)
+    # df["Number_of_Ratings"] = np.log1p(df["Number_of_Ratings"])
+    # df["Number_of_Reviews"] = np.log1p(df["Number_of_Reviews"])
 
     return df
 
 
 def clean_numeric_data(df):
-    df["ram_gb"] = df["ram_gb"].str.replace("GB", "").astype(int)
+    if df['ram_gb'].dtype == 'object':
+        df["ram_gb"] = df["ram_gb"].str.replace("GB", "").astype(int)
 
-    df["ssd"] = df["ssd"].str.replace("GB", "")
-    df["ssd"] = df["ssd"].str.replace("TB", "000")
-    df["ssd"] = df["ssd"].astype(int)
+    if df['ssd'].dtype == 'object':
+        df["ssd"] = df["ssd"].str.replace("GB", "")
+        df["ssd"] = df["ssd"].str.replace("TB", "000")
+        df["ssd"] = df["ssd"].astype(int)
 
-    df["hdd"] = df["hdd"].str.replace("TB", "000")
-    df["hdd"] = df["hdd"].str.replace("GB", "")
-    df["hdd"] = df["hdd"].astype(int)
+    if df['hdd'].dtype == 'object':
+        df["hdd"] = df["hdd"].str.replace("TB", "000")
+        df["hdd"] = df["hdd"].str.replace("GB", "")
+        df["hdd"] = df["hdd"].astype(int)
 
-    df["graphic_card_gb"] = df["graphic_card_gb"].str.replace("TB", "000")
-    df["graphic_card_gb"] = df["graphic_card_gb"].str.replace("GB", "")
-    df["graphic_card_gb"] = df["graphic_card_gb"].astype(int)
+    if df['graphic_card_gb'].dtype == 'object':
+        df["graphic_card_gb"] = df["graphic_card_gb"].str.replace("TB", "000")
+        df["graphic_card_gb"] = df["graphic_card_gb"].str.replace("GB", "")
+        df["graphic_card_gb"] = df["graphic_card_gb"].astype(int)
 
-    df["os_bit"] = df["os_bit"].str.replace("-bit", "").astype(int)
+    if df['os_bit'].dtype == 'object':
+        df["os_bit"] = df["os_bit"].str.replace("-bit", "").astype(int)
+        
+    if df['rating'].dtype == 'object':
+        df["rating"] = df["rating"].str.replace("stars", "")
+        df["rating"] = df["rating"].str.replace("star", "")
+        df["rating"] = df["rating"].astype(float)
 
     return df
 
@@ -87,7 +93,7 @@ def evaluate_model(models, X_test, y_test):
             "R2_Score": r2_score(y_test, y_pred),
         }
 
-    return results, y_pred
+    return results
 
 
 # print(df);
@@ -135,19 +141,31 @@ def best_model_plot(best_model, X):
     indices = np.argsort(important)[::-1]
     
     plt.figure(figsize=(8,5))
-    plt.bar(range(X.shape[1]), important[indices])
-    plt.xticks(range(X.shape[1]), X.columns[indices], rotation=90)
+    top_n = 15
+    plt.bar(range(top_n), important[indices][:top_n])
+    plt.xticks(range(top_n), X.columns[indices][:top_n], rotation=90)
     plt.title("Feature Importance in Laptop Price Prediction")
     plt.show()
     
     return 0
 
+def predict_laptop_price(user_input, model, columns):
+    # convert data to DataFrame
+    sample = pd.DataFrame([user_input])
+    
+    sample = clean_numeric_data(sample)
+    
+    sample = pd.get_dummies(sample)
+    sample = sample.reindex(columns=columns, fill_value=0)
+    
+    price = model.predict(sample)[0]
+    return price
 
 def main():
     print("Loading Data...")
     df = load_preprocess_data("./laptopPrice.csv")
 
-    X = df.drop("Price", axis=1)
+    X = df.drop(columns=["Price", "Number_of_Reviews", "Number_of_Ratings"], axis=1)
     y = df["Price"]
 
     X_train, X_test, y_train, y_test = train_test_split(
@@ -158,7 +176,7 @@ def main():
     models = train_model(X_train, y_train)
 
     print("\nevaluating model...")
-    results, y_pred = evaluate_model(models, X_test, y_test)
+    results = evaluate_model(models, X_test, y_test)
 
     print("\nModel performance metrics: ")
     for name, model_evaluation in results.items():
@@ -197,9 +215,48 @@ def main():
     
     best_model = grid.best_estimator_
     
+    # Save trained model
+    # with open("model.pkl", "wb") as f:
+    #     pickle.dump(best_model, f)
+        
+    # Save preprocessor if you used encoders/scalers
+    # # Example: if you had 'preprocessor' object in your code
+    # with open("preprocessor.pkl", "wb") as f:
+    #     pickle.dump(preprocessor, f)
+    
     best_model_plot(best_model, X)
     
     joblib.dump(best_model, "laptop_price_model.pkl")
+    
+    print("\n--- Laptop Price Prediction (CLI) ---")
+    
+    # Example input (later replace with input())
+    user_input = {
+        "brand": "Dell",
+        "processor_brand": "Intel",
+        "processor_name": "i5",
+        "processor_gnrtn": "10th",
+        "ram_gb": 8,
+        "ram_type": "DDR4",
+        "ssd": 512,
+        "hdd": 0,
+        "graphic_card_gb": 2,
+        "os": "Windows",
+        "os_bit": 64,
+        "weight": "1.5 Kg",
+        "rating": "4.2",
+        "warranty": "1 Year",
+        "Touchscreen": "No",
+        "msoffice": "Yes",
+    }
+    
+    price = predict_laptop_price(user_input, best_model, X.columns)
+    print(f"\nPredicted Laptop Price: ${price:,.2f}")
+    
+    # Save training feature columns
+    with open("train_columns.pkl", "wb") as f:
+        pickle.dump(X.columns, f)
+
 
     return results
 
